@@ -82,7 +82,7 @@ class BotHandlers:
     def button_handler(update: Update, context: CallbackContext) -> None:
         """Обработчик нажатий на кнопки"""
         query = update.callback_query
-        query.answer()  # Ответить на callback
+        query.answer()  
         
         data = query.data
         
