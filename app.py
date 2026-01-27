@@ -1,4 +1,5 @@
 import os
+import json
 import logging
 from flask import Flask, request, jsonify
 import requests
@@ -17,8 +18,13 @@ app = Flask(__name__)
 TOKEN = os.environ.get('TELEGRAM_TOKEN', '8506600032:AAEGyei4Il9al_dcCnLOxcZDsrT6M8NgeIA')
 WEBHOOK_DOMAIN = "https://manualwebhookbothost.bothost.ru"
 WEBHOOK_URL = f"{WEBHOOK_DOMAIN}/webhook"
+TELEGRAM_API = f"https://api.telegram.org/bot{TOKEN}"
 
-logger.info(f"Bot starting with token: {TOKEN[:10]}...")
+# Выводим информацию при запуске
+logger.info("=" * 60)
+logger.info("TELEGRAM BOT STARTING")
+logger.info("=" * 60)
+logger.info(f"Token present: {'YES' if TOKEN else 'NO'}")
 logger.info(f"Webhook URL: {WEBHOOK_URL}")
 
 @app.route('/')
@@ -28,76 +34,79 @@ def home():
     <!DOCTYPE html>
     <html>
     <head>
-        <title>Telegram Bot Status</title>
-        <meta charset="utf-8">
+        <title>Telegram Bot Control</title>
         <style>
             body { font-family: Arial, sans-serif; padding: 20px; max-width: 800px; margin: 0 auto; }
-            .btn { 
-                padding: 10px 20px; 
-                margin: 5px; 
-                background: #4CAF50; 
-                color: white; 
-                border: none; 
-                border-radius: 4px; 
-                cursor: pointer; 
+            h1 { color: #333; }
+            .button {
+                display: inline-block;
+                padding: 10px 20px;
+                margin: 10px 5px;
+                background: #007bff;
+                color: white;
+                text-decoration: none;
+                border-radius: 5px;
+                border: none;
+                cursor: pointer;
             }
-            .btn:hover { background: #45a049; }
-            .result { 
-                margin-top: 20px; 
-                padding: 15px; 
-                background: #f5f5f5; 
-                border-radius: 5px; 
-                font-family: monospace; 
+            .button:hover { background: #0056b3; }
+            .status {
+                padding: 15px;
+                margin: 15px 0;
+                background: #f8f9fa;
+                border-radius: 5px;
+                border-left: 4px solid #007bff;
+            }
+            pre {
+                background: #2d2d2d;
+                color: #f8f8f2;
+                padding: 15px;
+                border-radius: 5px;
+                overflow-x: auto;
             }
         </style>
     </head>
     <body>
         <h1>🤖 Telegram Bot Control Panel</h1>
         
-        <div>
-            <button class="btn" onclick="testBot()">Test Bot Token</button>
-            <button class="btn" onclick="setupWebhook()">Setup Webhook</button>
-            <button class="btn" onclick="checkWebhook()">Check Webhook</button>
+        <div class="status">
+            <p><strong>Webhook URL:</strong> <code>""" + WEBHOOK_URL + """</code></p>
+            <p><strong>Token:</strong> <code>""" + (TOKEN[:10] + "..." if TOKEN else "NOT SET") + """</code></p>
         </div>
         
-        <div id="result" class="result">
-            Click a button to test
+        <h3>Actions:</h3>
+        <button class="button" onclick="action('test_bot')">Test Bot Token</button>
+        <button class="button" onclick="action('setup_webhook')">Setup Webhook</button>
+        <button class="button" onclick="action('check_webhook')">Check Webhook</button>
+        <button class="button" onclick="action('delete_webhook')">Delete Webhook</button>
+        
+        <div class="status">
+            <h3>Instructions:</h3>
+            <ol>
+                <li>Click "Test Bot Token" - should show <code>"ok": true</code></li>
+                <li>Click "Setup Webhook" - should show success</li>
+                <li>Click "Check Webhook" - should show URL: <code>""" + WEBHOOK_URL + """</code></li>
+                <li>Open Telegram and send <code>/start</code> to your bot</li>
+            </ol>
+        </div>
+        
+        <div id="result" class="status">
+            <h3>Result:</h3>
+            <p>Click a button above to see results here</p>
         </div>
         
         <script>
-        function testBot() {
-            document.getElementById('result').innerHTML = 'Testing bot...';
-            fetch('/test_bot')
-                .then(r => r.json())
+        function action(endpoint) {
+            document.getElementById('result').innerHTML = '<p>Loading...</p>';
+            fetch('/' + endpoint)
+                .then(response => response.json())
                 .then(data => {
-                    document.getElementById('result').innerHTML = JSON.stringify(data, null, 2);
+                    document.getElementById('result').innerHTML = 
+                        '<h3>Result:</h3><pre>' + JSON.stringify(data, null, 2) + '</pre>';
                 })
-                .catch(e => {
-                    document.getElementById('result').innerHTML = 'Error: ' + e;
-                });
-        }
-        
-        function setupWebhook() {
-            document.getElementById('result').innerHTML = 'Setting up webhook...';
-            fetch('/setup_webhook')
-                .then(r => r.json())
-                .then(data => {
-                    document.getElementById('result').innerHTML = JSON.stringify(data, null, 2);
-                })
-                .catch(e => {
-                    document.getElementById('result').innerHTML = 'Error: ' + e;
-                });
-        }
-        
-        function checkWebhook() {
-            document.getElementById('result').innerHTML = 'Checking webhook...';
-            fetch('/check_webhook')
-                .then(r => r.json())
-                .then(data => {
-                    document.getElementById('result').innerHTML = JSON.stringify(data, null, 2);
-                })
-                .catch(e => {
-                    document.getElementById('result').innerHTML = 'Error: ' + e;
+                .catch(error => {
+                    document.getElementById('result').innerHTML = 
+                        '<h3>Error:</h3><p>' + error + '</p>';
                 });
         }
         </script>
@@ -107,58 +116,71 @@ def home():
 
 @app.route('/test_bot')
 def test_bot():
-    """Тест токена бота"""
+    """Проверка токена бота"""
     if not TOKEN:
-        return jsonify({"status": "error", "message": "Token not set"})
+        return jsonify({"ok": False, "error": "Token not set"})
     
     try:
-        response = requests.get(f"https://api.telegram.org/bot{TOKEN}/getMe", timeout=10)
+        response = requests.get(f"{TELEGRAM_API}/getMe", timeout=10)
         return response.json()
     except Exception as e:
-        return jsonify({"status": "error", "message": str(e)})
+        return jsonify({"ok": False, "error": str(e)})
 
 @app.route('/setup_webhook')
 def setup_webhook():
     """Установка вебхука"""
     if not TOKEN:
-        return jsonify({"status": "error", "message": "Token not set"})
+        return jsonify({"ok": False, "error": "Token not set"})
     
     try:
-        response = requests.get(
-            f"https://api.telegram.org/bot{TOKEN}/setWebhook?url={WEBHOOK_URL}",
-            timeout=10
-        )
-        return response.json()
+        response = requests.get(f"{TELEGRAM_API}/setWebhook?url={WEBHOOK_URL}", timeout=10)
+        data = response.json()
+        logger.info(f"Webhook setup result: {data}")
+        return data
     except Exception as e:
-        return jsonify({"status": "error", "message": str(e)})
+        return jsonify({"ok": False, "error": str(e)})
 
 @app.route('/check_webhook')
 def check_webhook():
-    """Проверка вебхука"""
+    """Проверка статуса вебхука"""
     if not TOKEN:
-        return jsonify({"status": "error", "message": "Token not set"})
+        return jsonify({"ok": False, "error": "Token not set"})
     
     try:
-        response = requests.get(
-            f"https://api.telegram.org/bot{TOKEN}/getWebhookInfo",
-            timeout=10
-        )
+        response = requests.get(f"{TELEGRAM_API}/getWebhookInfo", timeout=10)
         return response.json()
     except Exception as e:
-        return jsonify({"status": "error", "message": str(e)})
+        return jsonify({"ok": False, "error": str(e)})
+
+@app.route('/delete_webhook')
+def delete_webhook():
+    """Удаление вебхука"""
+    if not TOKEN:
+        return jsonify({"ok": False, "error": "Token not set"})
+    
+    try:
+        response = requests.get(f"{TELEGRAM_API}/deleteWebhook", timeout=10)
+        return response.json()
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)})
 
 @app.route('/webhook', methods=['POST'])
-def webhook():
-    """Обработчик вебхука от Telegram - ПОЛНОСТЬЮ СИНХРОННЫЙ"""
+def webhook_handler():
+    """
+    Обработчик вебхука от Telegram
+    ПОЛНОСТЬЮ СИНХРОННАЯ ФУНКЦИЯ
+    """
     try:
         # Получаем данные
         data = request.get_json()
-        logger.info(f"Received webhook: {data}")
         
-        # Проверяем токен
+        # Логируем входящие данные
+        logger.info(f"📨 Received webhook: {json.dumps(data, ensure_ascii=False)[:200]}...")
+        
+        # Если нет токена, просто возвращаем ok
         if not TOKEN:
             logger.error("Token not configured")
-            return jsonify({"ok": False}), 200
+            return jsonify({"ok": True})
         
         # Обрабатываем сообщение
         if 'message' in data:
@@ -166,85 +188,96 @@ def webhook():
             chat_id = message['chat']['id']
             text = message.get('text', '').strip()
             
-            logger.info(f"Processing message from {chat_id}: {text}")
+            logger.info(f"💬 Message from {chat_id}: {text}")
             
             # Формируем ответ
             response_text = ""
             if text == '/start':
-                response_text = "✅ Бот работает на bothost с вебхуком!"
+                response_text = (
+                    "🎉 Привет! Я бот на bothost!\n\n"
+                    "✅ Вебхук успешно подключен\n"
+                    "🌐 Домен: manualwebhookbothost.bothost.ru\n\n"
+                    "Команды:\n"
+                    "/help - помощь\n"
+                    "/status - статус\n"
+                    "/test - тест"
+                )
             elif text == '/help':
-                response_text = "Помощь: /start /help /status"
+                response_text = "Помощь: это тестовый бот на платформе bothost"
             elif text == '/status':
-                response_text = f"Статус: OK\nДомен: {WEBHOOK_DOMAIN}"
+                response_text = f"Статус: ✅ Работает\nWebhook: {WEBHOOK_URL}"
+            elif text == '/test':
+                response_text = "✅ Тест пройден! Бот работает!"
             elif text:
-                response_text = f"Вы написали: {text}"
+                response_text = f"📝 Вы написали: {text}"
             
             # Отправляем ответ если есть что отправлять
             if response_text:
-                send_message(chat_id, response_text)
+                # Отправляем сообщение через Telegram API
+                send_to_telegram(chat_id, response_text)
         
+        # Всегда возвращаем успех
         return jsonify({"ok": True})
         
     except Exception as e:
-        logger.error(f"Error in webhook: {e}")
-        return jsonify({"ok": False, "error": str(e)}), 500
+        logger.error(f"❌ Error in webhook handler: {e}")
+        # Все равно возвращаем ok, чтобы Telegram не считал доставку неудачной
+        return jsonify({"ok": True})
 
-def send_message(chat_id, text):
+def send_to_telegram(chat_id, text):
     """Отправка сообщения в Telegram"""
     try:
         response = requests.post(
-            f"https://api.telegram.org/bot{TOKEN}/sendMessage",
+            f"{TELEGRAM_API}/sendMessage",
             json={
                 "chat_id": chat_id,
-                "text": text
+                "text": text,
+                "parse_mode": "HTML"
             },
             timeout=5
         )
-        logger.info(f"Sent message to {chat_id}, response: {response.status_code}")
-        return response.json()
+        
+        if response.status_code == 200:
+            logger.info(f"✅ Sent message to {chat_id}")
+        else:
+            logger.error(f"❌ Failed to send message: {response.text}")
+            
     except Exception as e:
-        logger.error(f"Error sending message: {e}")
-        return None
+        logger.error(f"❌ Error sending to Telegram: {e}")
 
 @app.route('/health')
-def health():
-    """Health check"""
-    return jsonify({"status": "healthy", "webhook_url": WEBHOOK_URL})
+def health_check():
+    """Health check endpoint"""
+    return jsonify({
+        "status": "healthy",
+        "service": "telegram-bot",
+        "webhook_url": WEBHOOK_URL,
+        "token_set": bool(TOKEN)
+    })
 
 if __name__ == '__main__':
-    # Проверяем конфигурацию при запуске
-    print("=" * 60)
-    print("TELEGRAM BOT STARTING")
-    print("=" * 60)
-    
+    # Автоматически устанавливаем вебхук при запуске
     if TOKEN:
-        print(f"Token: {TOKEN[:10]}...")
-        
-        # Проверяем бота
         try:
-            print("Checking bot...")
-            bot_info = requests.get(f"https://api.telegram.org/bot{TOKEN}/getMe", timeout=10).json()
+            logger.info("🔧 Setting up webhook automatically...")
+            response = requests.get(f"{TELEGRAM_API}/setWebhook?url={WEBHOOK_URL}", timeout=10)
+            logger.info(f"🔧 Webhook setup result: {response.json()}")
+            
+            # Проверяем бота
+            bot_info = requests.get(f"{TELEGRAM_API}/getMe", timeout=10).json()
             if bot_info.get('ok'):
-                print(f"✅ Bot @{bot_info['result']['username']} is valid")
-                
-                # Устанавливаем вебхук
-                print(f"Setting webhook to: {WEBHOOK_URL}")
-                webhook_result = requests.get(
-                    f"https://api.telegram.org/bot{TOKEN}/setWebhook?url={WEBHOOK_URL}",
-                    timeout=10
-                ).json()
-                print(f"Webhook result: {webhook_result}")
+                logger.info(f"🤖 Bot @{bot_info['result']['username']} is ready!")
             else:
-                print(f"❌ Bot error: {bot_info.get('description')}")
+                logger.error(f"❌ Bot error: {bot_info.get('description')}")
+                
         except Exception as e:
-            print(f"⚠️ Startup error: {e}")
+            logger.error(f"⚠️ Startup error: {e}")
     else:
-        print("❌ ERROR: TELEGRAM_TOKEN environment variable is not set!")
-        print("Please set TELEGRAM_TOKEN in bothost settings")
+        logger.error("❌ TELEGRAM_TOKEN is not set! Bot will not work.")
     
     # Запускаем сервер
     port = int(os.environ.get('PORT', 3000))
-    print(f"\nStarting server on port {port}")
-    print("=" * 60)
+    logger.info(f"🚀 Starting server on port {port}")
+    logger.info("=" * 60)
     
     app.run(host='0.0.0.0', port=port, debug=False)
