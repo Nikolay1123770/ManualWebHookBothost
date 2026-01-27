@@ -20,8 +20,8 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
-TOKEN = os.environ.get('TELEGRAM_TOKEN', 'ВАШ_ТОКЕН_БОТА')
-WEBHOOK_URL = os.environ.get('WEBHOOK_URL', 'https://ваш-домен.bothost.app')
+TOKEN = os.environ.get('TELEGRAM_TOKEN', '8506600032:AAEGyei4Il9al_dcCnLOxcZDsrT6M8NgeIA')
+WEBHOOK_URL = os.environ.get('WEBHOOK_URL', 'https://ManualWebHookBothost.bothost.app/webhook')
 PORT = int(os.environ.get('PORT', 3000))
 
 application = Application.builder().token(TOKEN).build()
