@@ -12,25 +12,20 @@ from telegram.ext import (
 import asyncio
 from threading import Thread
 
-# Настройка логирования
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
-# Инициализация Flask
 app = Flask(__name__)
 
-# Конфигурация
 TOKEN = os.environ.get('TELEGRAM_TOKEN', 'ВАШ_ТОКЕН_БОТА')
 WEBHOOK_URL = os.environ.get('WEBHOOK_URL', 'https://ваш-домен.bothost.app')
 PORT = int(os.environ.get('PORT', 3000))
 
-# Создание Application
 application = Application.builder().token(TOKEN).build()
 
-# Обработчики команд
 async def start(update: Update, context):
     """Обработчик команды /start"""
     user = update.effective_user
@@ -77,7 +72,6 @@ async def handle_message(update: Update, context):
     text = update.message.text
     await update.message.reply_text(f"Вы написали: {text}")
 
-# Настройка обработчиков
 def setup_handlers():
     """Добавление обработчиков"""
     application.add_handler(CommandHandler("start", start))
@@ -86,7 +80,6 @@ def setup_handlers():
     application.add_handler(CommandHandler("webhook", webhook_info))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-# Flask маршруты
 @app.route('/')
 def index():
     html_content = f'''
@@ -131,7 +124,6 @@ async def webhook():
         data = request.get_json()
         update = Update.de_json(data, application.bot)
         
-        # Обработка update
         await application.process_update(update)
         return jsonify({"status": "ok"}), 200
     except Exception as e:
@@ -142,7 +134,6 @@ async def webhook():
 def set_webhook():
     """Установка вебхука"""
     try:
-        # Запускаем асинхронную функцию
         async def _set_webhook():
             await application.bot.set_webhook(f"{WEBHOOK_URL}/webhook")
         
@@ -183,10 +174,8 @@ def run_flask():
 
 def main():
     """Основная функция запуска"""
-    # Настройка обработчиков
     setup_handlers()
     
-    # Запуск Flask в отдельном потоке
     flask_thread = Thread(target=run_flask)
     flask_thread.start()
     
