@@ -25,7 +25,7 @@ app = Flask(__name__)
 # Конфигурация
 TOKEN = os.environ.get('TELEGRAM_TOKEN', 'ВАШ_ТОКЕН_БОТА')
 WEBHOOK_URL = os.environ.get('WEBHOOK_URL', 'https://ваш-домен.bothost.app')
-PORT = int(os.environ.get('PORT', 5000))
+PORT = int(os.environ.get('PORT', 3000))
 
 # Создание Application
 application = Application.builder().token(TOKEN).build()
@@ -89,16 +89,16 @@ def setup_handlers():
 # Flask маршруты
 @app.route('/')
 def index():
-    return """
+    html_content = f'''
     <!DOCTYPE html>
     <html>
     <head>
         <title>🤖 Telegram Bot Webhook</title>
         <style>
-            body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
-            .status { background: #4CAF50; color: white; padding: 15px; border-radius: 5px; }
-            .endpoint { background: #f5f5f5; padding: 10px; margin: 10px 0; border-left: 4px solid #2196F3; }
-            code { background: #e0e0e0; padding: 2px 5px; border-radius: 3px; }
+            body {{ font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }}
+            .status {{ background: #4CAF50; color: white; padding: 15px; border-radius: 5px; }}
+            .endpoint {{ background: #f5f5f5; padding: 10px; margin: 10px 0; border-left: 4px solid #2196F3; }}
+            code {{ background: #e0e0e0; padding: 2px 5px; border-radius: 3px; }}
         </style>
     </head>
     <body>
@@ -109,7 +109,7 @@ def index():
         <ul>
             <li><strong>Платформа:</strong> bothost.app</li>
             <li><strong>Метод:</strong> Webhook</li>
-            <li><strong>Webhook URL:</strong> <code>{}/webhook</code></li>
+            <li><strong>Webhook URL:</strong> <code>{WEBHOOK_URL}/webhook</code></li>
             <li><strong>Библиотека:</strong> python-telegram-bot 20.x</li>
         </ul>
         
@@ -121,7 +121,8 @@ def index():
         <p>Проверьте бота в Telegram!</p>
     </body>
     </html>
-    """.format(WEBHOOK_URL)
+    '''
+    return html_content
 
 @app.route('/webhook', methods=['POST'])
 async def webhook():
