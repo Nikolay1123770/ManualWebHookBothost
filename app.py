@@ -13,229 +13,156 @@ logger = logging.getLogger(__name__)
 # Инициализация Flask
 app = Flask(__name__)
 
-# Конфигурация - ВАЖНО: замените на ваш токен!
-TOKEN = os.environ.get('TELEGRAM_TOKEN', '8506600032:AAEGyei4Il9al_dcCnLOxcZDsrT6M8NgeIA')
+# Конфигурация
+TOKEN = os.environ.get('TELEGRAM_TOKEN', '')
+# ВАЖНО: Используем .ru а не .app!
+WEBHOOK_DOMAIN = "https://manualwebhookbothost.bothost.ru"
+WEBHOOK_URL = f"{WEBHOOK_DOMAIN}/webhook"
 BASE_URL = f"https://api.telegram.org/bot{TOKEN}"
-
-# Домен bothost - он уже правильный!
-WEBHOOK_URL = "https://manualwebhookbothost.bothost.app/webhook"
 
 @app.route('/')
 def home():
-    return """
+    return f"""
     <!DOCTYPE html>
     <html>
     <head>
-        <title>Telegram Bot Status</title>
+        <title>🤖 Telegram Bot Diagnostics</title>
         <style>
-            body { font-family: Arial, sans-serif; padding: 20px; }
-            .success { color: green; }
-            .error { color: red; }
-            button { padding: 10px 20px; font-size: 16px; }
+            body {{ font-family: Arial, sans-serif; padding: 20px; }}
+            .btn {{ padding: 10px 20px; margin: 5px; background: #007bff; color: white; border: none; cursor: pointer; }}
+            .btn:hover {{ background: #0056b3; }}
+            .success {{ color: green; }}
+            .error {{ color: red; }}
         </style>
     </head>
     <body>
-        <h1>🤖 Telegram Bot Control Panel</h1>
+        <h1>Диагностика Telegram Bot</h1>
+        <p><strong>Домен:</strong> {WEBHOOK_DOMAIN}</p>
+        <p><strong>Webhook URL:</strong> {WEBHOOK_URL}</p>
         
-        <div id="status">Проверяем статус...</div>
+        <button class="btn" onclick="testDomain()">1. Проверить домен</button>
+        <button class="btn" onclick="setupWebhook()">2. Установить вебхук (.ru)</button>
+        <button class="btn" onclick="setupWebhookApp()">3. Установить вебхук (.app)</button>
+        <button class="btn" onclick="checkWebhook()">4. Проверить вебхук</button>
         
-        <button onclick="setupWebhook()">1. Установить вебхук</button>
-        <button onclick="checkWebhook()">2. Проверить вебхук</button>
-        <button onclick="checkBot()">3. Проверить бота</button>
-        <button onclick="sendTest()">4. Отправить тест в Telegram</button>
-        
-        <div id="result" style="margin-top: 20px; padding: 10px; background: #f0f0f0;"></div>
+        <div id="result" style="margin-top: 20px; padding: 15px; background: #f5f5f5; border-radius: 5px;"></div>
         
         <script>
-        async function apiCall(endpoint) {
-            const response = await fetch(endpoint);
-            const data = await response.json();
-            return data;
-        }
+        async function apiCall(url) {{
+            const response = await fetch(url);
+            return await response.json();
+        }}
         
-        async function setupWebhook() {
-            const result = document.getElementById('result');
-            result.innerHTML = 'Устанавливаю вебхук...';
-            
-            try {
-                const response = await fetch('/setup_webhook');
+        function showResult(text) {{
+            document.getElementById('result').innerHTML = '<pre>' + JSON.stringify(text, null, 2) + '</pre>';
+        }}
+        
+        async function testDomain() {{
+            showResult('Проверяю домен...');
+            try {{
+                const response = await fetch('{WEBHOOK_DOMAIN}/health');
                 const data = await response.json();
-                result.innerHTML = JSON.stringify(data, null, 2);
-            } catch (error) {
-                result.innerHTML = 'Ошибка: ' + error;
-            }
-        }
+                showResult({{domain: '{WEBHOOK_DOMAIN}', status: 'available', response: data}});
+            }} catch (error) {{
+                showResult({{domain: '{WEBHOOK_DOMAIN}', status: 'not available', error: error.message}});
+            }}
+        }}
         
-        async function checkWebhook() {
-            const result = document.getElementById('result');
-            result.innerHTML = 'Проверяю вебхук...';
-            
-            try {
+        async function setupWebhook() {{
+            showResult('Устанавливаю вебхук на .ru домен...');
+            try {{
+                const response = await fetch('/setup_webhook_ru');
+                const data = await response.json();
+                showResult(data);
+            }} catch (error) {{
+                showResult({{error: error.message}});
+            }}
+        }}
+        
+        async function setupWebhookApp() {{
+            showResult('Устанавливаю вебхук на .app домен...');
+            try {{
+                const response = await fetch('/setup_webhook_app');
+                const data = await response.json();
+                showResult(data);
+            }} catch (error) {{
+                showResult({{error: error.message}});
+            }}
+        }}
+        
+        async function checkWebhook() {{
+            showResult('Проверяю вебхук...');
+            try {{
                 const response = await fetch('/check_webhook');
                 const data = await response.json();
-                result.innerHTML = JSON.stringify(data, null, 2);
-            } catch (error) {
-                result.innerHTML = 'Ошибка: ' + error;
-            }
-        }
-        
-        async function checkBot() {
-            const result = document.getElementById('result');
-            result.innerHTML = 'Проверяю бота...';
-            
-            try {
-                const response = await fetch('/check_bot');
-                const data = await response.json();
-                result.innerHTML = JSON.stringify(data, null, 2);
-            } catch (error) {
-                result.innerHTML = 'Ошибка: ' + error;
-            }
-        }
-        
-        async function sendTest() {
-            const chatId = prompt('Введите ваш chat ID (напишите боту /id чтобы получить):');
-            if (!chatId) return;
-            
-            const result = document.getElementById('result');
-            result.innerHTML = 'Отправляю сообщение...';
-            
-            try {
-                const response = await fetch(`/send_test?chat_id=${chatId}`);
-                const data = await response.json();
-                result.innerHTML = JSON.stringify(data, null, 2);
-            } catch (error) {
-                result.innerHTML = 'Ошибка: ' + error;
-            }
-        }
-        
-        // Проверяем статус при загрузке
-        window.onload = function() {
-            checkStatus();
-        }
-        
-        async function checkStatus() {
-            const status = document.getElementById('status');
-            try {
-                const response = await fetch('/status');
-                const data = await response.json();
-                status.innerHTML = `<span class="success">✅ ${data.message}</span>`;
-            } catch (error) {
-                status.innerHTML = `<span class="error">❌ Ошибка подключения</span>`;
-            }
-        }
+                showResult(data);
+            }} catch (error) {{
+                showResult({{error: error.message}});
+            }}
+        }}
         </script>
     </body>
     </html>
     """
 
-@app.route('/status')
-def status():
-    return {"status": "online", "message": "Сервер работает!", "webhook_url": WEBHOOK_URL}
+@app.route('/health')
+def health():
+    return {"status": "healthy", "service": "telegram-bot", "domain": WEBHOOK_DOMAIN}
 
-@app.route('/setup_webhook')
-def setup_webhook():
-    """Установка вебхука"""
+@app.route('/setup_webhook_ru')
+def setup_webhook_ru():
+    """Установка вебхука на .ru домен"""
     try:
-        # Устанавливаем вебхук
         response = requests.get(f"{BASE_URL}/setWebhook?url={WEBHOOK_URL}")
-        data = response.json()
-        
-        logger.info(f"Webhook setup result: {data}")
-        
-        # Проверяем установку
-        if data.get('ok'):
-            return {
-                "status": "success",
-                "message": "Вебхук успешно установлен!",
-                "details": data,
-                "webhook_url": WEBHOOK_URL
-            }
-        else:
-            return {
-                "status": "error",
-                "message": f"Ошибка установки вебхука: {data.get('description', 'Unknown error')}",
-                "details": data
-            }
+        return response.json()
     except Exception as e:
-        return {"status": "error", "message": f"Exception: {str(e)}"}
+        return {"status": "error", "message": str(e)}
+
+@app.route('/setup_webhook_app')
+def setup_webhook_app():
+    """Установка вебхука на .app домен (если доступен)"""
+    try:
+        app_webhook = "https://manualwebhookbothost.bothost.app/webhook"
+        response = requests.get(f"{BASE_URL}/setWebhook?url={app_webhook}")
+        return response.json()
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 @app.route('/check_webhook')
 def check_webhook():
     """Проверка вебхука"""
     try:
         response = requests.get(f"{BASE_URL}/getWebhookInfo")
-        data = response.json()
-        return data
+        return response.json()
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
 @app.route('/check_bot')
 def check_bot():
-    """Проверка доступности бота"""
+    """Проверка бота"""
     try:
         response = requests.get(f"{BASE_URL}/getMe")
         return response.json()
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
-@app.route('/send_test')
-def send_test():
-    """Отправка тестового сообщения"""
-    try:
-        chat_id = request.args.get('chat_id')
-        if not chat_id:
-            return {"status": "error", "message": "Нет chat_id"}
-        
-        # Отправляем сообщение
-        response = requests.post(
-            f"{BASE_URL}/sendMessage",
-            json={
-                "chat_id": chat_id,
-                "text": "✅ Тестовое сообщение от бота! Если вы видите это, бот работает!"
-            }
-        )
-        
-        return response.json()
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
-
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    """Основной эндпоинт для вебхука Telegram"""
+    """Основной эндпоинт вебхука"""
     try:
         data = request.get_json()
-        logger.info(f"Received webhook data: {data}")
         
-        # Обрабатываем сообщение
         if 'message' in data:
-            message = data['message']
-            chat_id = message['chat']['id']
-            text = message.get('text', '').strip()
+            chat_id = data['message']['chat']['id']
+            text = data['message'].get('text', '')
             
-            logger.info(f"Message from {chat_id}: {text}")
-            
-            # Обработка команд
+            # Простая логика ответа
             if text == '/start':
-                send_message(chat_id, 
-                    "🎉 Привет! Я бот на bothost!\n\n"
-                    "Доступные команды:\n"
-                    "/help - помощь\n"
-                    "/id - получить ваш ID\n"
-                    "/test - тестовая команда"
-                )
-            elif text == '/help':
-                send_message(chat_id, 
-                    "📚 Помощь:\n"
-                    "Бот работает на платформе bothost\n"
-                    "Использует webhook для получения сообщений\n"
-                    "Код открыт и доступен на GitHub"
-                )
-            elif text == '/id':
-                send_message(chat_id, f"🆔 Ваш chat ID: {chat_id}")
-            elif text == '/test':
-                send_message(chat_id, "✅ Тест пройден! Бот работает корректно!")
+                send_message(chat_id, "🎉 Бот работает! Вебхук установлен на bothost!")
+            elif text == '/domain':
+                send_message(chat_id, f"Домен бота: {WEBHOOK_DOMAIN}")
             elif text:
-                send_message(chat_id, f"📝 Вы написали: {text}")
+                send_message(chat_id, f"Вы написали: {text}")
         
         return {"ok": True}
     except Exception as e:
@@ -256,31 +183,41 @@ def send_message(chat_id, text):
     except Exception as e:
         logger.error(f"Send message error: {e}")
 
-# Автоматически устанавливаем вебхук при запуске
 if __name__ == '__main__':
-    try:
-        # Проверяем токен
-        print(f"🔑 Токен: {TOKEN[:10]}...")
-        
-        # Устанавливаем вебхук
-        print(f"🌐 Устанавливаю вебхук на: {WEBHOOK_URL}")
-        response = requests.get(f"{BASE_URL}/setWebhook?url={WEBHOOK_URL}")
-        print(f"📡 Результат установки вебхука: {response.json()}")
-        
-        # Проверяем бота
-        print("🤖 Проверяю бота...")
-        bot_info = requests.get(f"{BASE_URL}/getMe").json()
-        print(f"📊 Информация о боте: {bot_info}")
-        
-        if bot_info.get('ok'):
-            print(f"✅ Бот @{bot_info['result']['username']} готов к работе!")
-        else:
-            print(f"❌ Ошибка бота: {bot_info.get('description')}")
-            
-    except Exception as e:
-        print(f"⚠️ Ошибка при запуске: {e}")
+    # Выводим информацию для отладки
+    print("=" * 50)
+    print("🤖 TELEGRAM BOT STARTUP")
+    print("=" * 50)
+    print(f"Token: {TOKEN[:10]}..." if TOKEN else "Token: NOT SET")
+    print(f"Webhook URL: {WEBHOOK_URL}")
     
-    # Запускаем сервер
+    # Проверяем токен
+    if TOKEN:
+        try:
+            # Проверяем бота
+            print("\n🔍 Checking bot...")
+            bot_response = requests.get(f"{BASE_URL}/getMe").json()
+            print(f"Bot info: {bot_response}")
+            
+            if bot_response.get('ok'):
+                print(f"✅ Bot @{bot_response['result']['username']} is valid")
+                
+                # Устанавливаем вебхук
+                print(f"\n🌐 Setting webhook to: {WEBHOOK_URL}")
+                webhook_response = requests.get(f"{BASE_URL}/setWebhook?url={WEBHOOK_URL}").json()
+                print(f"Webhook response: {webhook_response}")
+            else:
+                print(f"❌ Bot error: {bot_response.get('description')}")
+                
+        except Exception as e:
+            print(f"⚠️ Error: {e}")
+    
+    else:
+        print("❌ ERROR: TELEGRAM_TOKEN is not set!")
+        print("Please set TELEGRAM_TOKEN environment variable in bothost")
+    
+    # Запуск сервера
     port = int(os.environ.get('PORT', 3000))
-    print(f"🚀 Сервер запущен на порту {port}")
+    print(f"\n🚀 Starting server on port {port}")
+    print("=" * 50)
     app.run(host='0.0.0.0', port=port, debug=False)
