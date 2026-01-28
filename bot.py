@@ -29,21 +29,39 @@ app = Flask(__name__)
 
 # Глобальная переменная для отслеживания состояния вебхука
 webhook_configured = False
+bot_username = ""
+
+def webhook_info_to_dict(webhook_info):
+    """Конвертация объекта WebhookInfo в словарь"""
+    return {
+        'url': webhook_info.url,
+        'has_custom_certificate': webhook_info.has_custom_certificate,
+        'pending_update_count': webhook_info.pending_update_count,
+        'max_connections': webhook_info.max_connections,
+        'ip_address': webhook_info.ip_address
+    }
 
 def configure_webhook(force=False):
     """Настройка вебхука - ВЫЗЫВАЕТСЯ АВТОМАТИЧЕСКИ ПРИ ЗАПУСКЕ"""
-    global webhook_configured
+    global webhook_configured, bot_username
     
     if webhook_configured and not force:
         logger.info("Вебхук уже настроен")
         return True
     
     try:
+        # Получаем информацию о боте
+        bot_info = bot.get_me()
+        bot_username = bot_info.username
+        
         # Формируем URL вебхука
         webhook_url = f"https://{DOMAIN}/webhook"
         
+        logger.info(f"🔄 Настраиваю вебхук для бота @{bot_username}...")
+        
         # Удаляем старый вебхук
         bot.remove_webhook()
+        logger.info("Старый вебхук удален")
         
         # Устанавливаем новый вебхук
         success = bot.set_webhook(
@@ -54,12 +72,18 @@ def configure_webhook(force=False):
         
         if success:
             webhook_configured = True
-            logger.info(f"✅ ВЕБХУК УСПЕШНО УСТАНОВЛЕН!")
-            logger.info(f"🌐 URL: {webhook_url}")
             
             # Получаем информацию о вебхуке
             webhook_info = bot.get_webhook_info()
-            logger.info(f"📊 Информация о вебхуке: {webhook_info.to_dict()}")
+            webhook_dict = webhook_info_to_dict(webhook_info)
+            
+            logger.info("✅ ВЕБХУК УСПЕШНО УСТАНОВЛЕН!")
+            logger.info(f"🌐 URL: {webhook_url}")
+            logger.info(f"📊 Информация о вебхуке:")
+            logger.info(f"   - URL: {webhook_dict['url']}")
+            logger.info(f"   - Ожидающих обновлений: {webhook_dict['pending_update_count']}")
+            logger.info(f"   - Макс. соединений: {webhook_dict['max_connections']}")
+            logger.info(f"   - IP адрес: {webhook_dict['ip_address']}")
             
             return True
         else:
@@ -67,7 +91,7 @@ def configure_webhook(force=False):
             return False
             
     except Exception as e:
-        logger.error(f"❌ Ошибка настройки вебхука: {e}")
+        logger.error(f"❌ Ошибка настройки вебхука: {str(e)}")
         return False
 
 # Конфигурируем вебхук ПРИ ЗАПУСКЕ приложения
@@ -86,13 +110,14 @@ def start_handler(message):
     ✅ <b>Бот работает на вебхуках!</b>
     🌐 <b>Домен:</b> {DOMAIN}
     🆔 <b>Ваш ID:</b> <code>{user.id}</code>
-    🤖 <b>Бот:</b> @{bot.get_me().username}
+    🤖 <b>Бот:</b> @{bot_username}
 
     <b>Команды:</b>
     /start - Начало работы
     /webhook - Проверить вебхук
     /status - Статус бота
     /echo [текст] - Эхо
+    /test - Тест бота
 
     <b>Тестируйте команды!</b>
     """
@@ -103,13 +128,19 @@ def start_handler(message):
         parse_mode='HTML'
     )
     
-    logger.info(f"Новый пользователь: {user.first_name} (ID: {user.id})")
+    logger.info(f"📨 Команда /start от {user.first_name} (ID: {user.id})")
+
+@bot.message_handler(commands=['test'])
+def test_handler(message):
+    """Тестовая команда"""
+    bot.reply_to(message, "✅ Бот работает отлично! Вебхук активен.")
 
 @bot.message_handler(commands=['webhook'])
 def webhook_info(message):
     """Информация о вебхуке"""
     try:
-        info = bot.get_webhook_info().to_dict()
+        webhook_info = bot.get_webhook_info()
+        info = webhook_info_to_dict(webhook_info)
         
         status = "✅ АКТИВЕН" if info.get('url') else "❌ НЕ АКТИВЕН"
         
@@ -139,7 +170,7 @@ def status_command(message):
 
     ✅ <b>Работает на вебхуках</b>
     🌐 <b>Домен:</b> {DOMAIN}
-    🤖 <b>Username:</b> @{bot.get_me().username}
+    🤖 <b>Username:</b> @{bot_username}
     ⚡ <b>Режим:</b> Вебхук (Webhook)
     🔧 <b>Вебхук настроен:</b> {'Да' if webhook_configured else 'Нет'}
     
@@ -158,6 +189,7 @@ def echo_command(message):
 @bot.message_handler(func=lambda m: True)
 def echo_all(message):
     """Обработка всех сообщений"""
+    logger.info(f"📝 Сообщение от {message.from_user.id}: {message.text}")
     bot.reply_to(message, f"📝 Вы написали: {message.text}")
 
 # ============ FLASK ENDPOINTS ============
@@ -169,10 +201,10 @@ def webhook():
         try:
             update = telebot.types.Update.de_json(request.get_json())
             bot.process_new_updates([update])
-            logger.debug(f"Обработано обновление: {update.update_id}")
+            logger.debug(f"✅ Обработано обновление: {update.update_id}")
             return jsonify({'status': 'ok'}), 200
         except Exception as e:
-            logger.error(f"Ошибка обработки вебхука: {e}")
+            logger.error(f"❌ Ошибка обработки вебхука: {str(e)}")
             return jsonify({'error': str(e)}), 500
     return jsonify({'error': 'Invalid content-type'}), 400
 
@@ -183,11 +215,14 @@ def set_webhook_endpoint():
         success = configure_webhook(force=True)
         
         if success:
-            info = bot.get_webhook_info().to_dict()
+            webhook_info_obj = bot.get_webhook_info()
+            info = webhook_info_to_dict(webhook_info_obj)
+            
             return jsonify({
                 'status': 'success',
                 'message': 'Вебхук успешно установлен',
                 'domain': DOMAIN,
+                'bot_username': bot_username,
                 'webhook_url': info.get('url'),
                 'webhook_info': info
             }), 200
@@ -210,7 +245,8 @@ def remove_webhook():
         
         return jsonify({
             'status': 'success',
-            'message': 'Вебхук удален'
+            'message': 'Вебхук удален',
+            'bot_username': bot_username
         }), 200
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
@@ -218,21 +254,37 @@ def remove_webhook():
 @app.route('/health', methods=['GET'])
 def health_check():
     """Health check для Bot Host"""
-    return jsonify({
-        'status': 'healthy',
-        'bot': bot.get_me().username if TOKEN else 'not_configured',
-        'webhook_configured': webhook_configured,
-        'domain': DOMAIN,
-        'timestamp': datetime.now().isoformat()
-    }), 200
+    try:
+        bot_info = bot.get_me()
+        webhook_info_obj = bot.get_webhook_info()
+        webhook_info = webhook_info_to_dict(webhook_info_obj)
+        
+        return jsonify({
+            'status': 'healthy',
+            'bot': bot_info.username,
+            'bot_id': bot_info.id,
+            'webhook_configured': webhook_configured,
+            'webhook_url': webhook_info.get('url'),
+            'domain': DOMAIN,
+            'timestamp': datetime.now().isoformat()
+        }), 200
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e),
+            'timestamp': datetime.now().isoformat()
+        }), 500
 
 @app.route('/webhook_info', methods=['GET'])
 def get_webhook_info():
     """Получить информацию о вебхуке"""
     try:
-        info = bot.get_webhook_info().to_dict()
+        webhook_info_obj = bot.get_webhook_info()
+        info = webhook_info_to_dict(webhook_info_obj)
+        
         return jsonify({
             'status': 'success',
+            'bot_username': bot_username,
             'webhook_info': info,
             'domain': DOMAIN,
             'configured': webhook_configured
@@ -240,147 +292,366 @@ def get_webhook_info():
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
+@app.route('/bot_info', methods=['GET'])
+def get_bot_info():
+    """Получить информацию о боте"""
+    try:
+        bot_info = bot.get_me()
+        
+        return jsonify({
+            'status': 'success',
+            'bot_info': {
+                'id': bot_info.id,
+                'username': bot_info.username,
+                'first_name': bot_info.first_name,
+                'is_bot': bot_info.is_bot
+            },
+            'webhook_configured': webhook_configured,
+            'domain': DOMAIN
+        }), 200
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
 @app.route('/')
 def index():
     """Главная страница"""
+    webhook_status = "✅ АКТИВЕН" if webhook_configured else "❌ НЕ АКТИВЕН"
+    
     return f'''
     <!DOCTYPE html>
     <html>
     <head>
-        <title>🤖 Telegram Bot на Webhook</title>
+        <title>🤖 Telegram Bot @{bot_username}</title>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <style>
+            * {{
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }}
+            
             body {{
-                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-                max-width: 800px;
-                margin: 0 auto;
-                padding: 20px;
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                color: white;
+                font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+                background: linear-gradient(135deg, #6a11cb 0%, #2575fc 100%);
+                color: #fff;
                 min-height: 100vh;
-            }}
-            .container {{
-                background: rgba(255, 255, 255, 0.95);
-                color: #333;
-                border-radius: 20px;
-                padding: 40px;
-                box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-            }}
-            h1 {{ color: #667eea; margin-top: 0; }}
-            .status {{
-                padding: 15px;
-                border-radius: 10px;
-                margin: 20px 0;
-                font-weight: bold;
-            }}
-            .success {{ background: #d4edda; color: #155724; }}
-            .endpoints {{
-                background: #f8f9fa;
                 padding: 20px;
-                border-radius: 10px;
-                margin: 20px 0;
             }}
-            .endpoint {{
-                background: white;
-                padding: 15px;
-                margin: 10px 0;
-                border-left: 5px solid #667eea;
-                border-radius: 5px;
+            
+            .container {{
+                max-width: 1000px;
+                margin: 0 auto;
+                background: rgba(255, 255, 255, 0.95);
+                border-radius: 24px;
+                padding: 40px;
+                box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+                color: #333;
+            }}
+            
+            .header {{
+                text-align: center;
+                margin-bottom: 40px;
+            }}
+            
+            .bot-avatar {{
+                width: 120px;
+                height: 120px;
+                background: linear-gradient(135deg, #6a11cb 0%, #2575fc 100%);
+                border-radius: 50%;
+                margin: 0 auto 20px;
                 display: flex;
-                justify-content: space-between;
                 align-items: center;
-            }}
-            .btn {{
-                background: #667eea;
+                justify-content: center;
+                font-size: 48px;
                 color: white;
-                padding: 10px 20px;
-                border: none;
-                border-radius: 5px;
-                text-decoration: none;
-                display: inline-block;
-                margin: 5px;
-                transition: transform 0.2s;
             }}
+            
+            h1 {{
+                color: #2d3748;
+                font-size: 36px;
+                margin-bottom: 10px;
+            }}
+            
+            .subtitle {{
+                color: #4a5568;
+                font-size: 18px;
+                margin-bottom: 30px;
+            }}
+            
+            .status-card {{
+                background: linear-gradient(135deg, #48bb78 0%, #38a169 100%);
+                color: white;
+                padding: 25px;
+                border-radius: 16px;
+                margin-bottom: 30px;
+                display: flex;
+                align-items: center;
+                gap: 20px;
+            }}
+            
+            .status-icon {{
+                font-size: 48px;
+            }}
+            
+            .status-content h3 {{
+                font-size: 24px;
+                margin-bottom: 5px;
+            }}
+            
+            .endpoints-grid {{
+                display: grid;
+                grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+                gap: 20px;
+                margin-bottom: 40px;
+            }}
+            
+            .endpoint-card {{
+                background: #f7fafc;
+                border: 2px solid #e2e8f0;
+                border-radius: 16px;
+                padding: 25px;
+                transition: all 0.3s ease;
+            }}
+            
+            .endpoint-card:hover {{
+                transform: translateY(-5px);
+                box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+                border-color: #4299e1;
+            }}
+            
+            .endpoint-card h3 {{
+                color: #2d3748;
+                margin-bottom: 10px;
+                font-size: 18px;
+            }}
+            
+            .endpoint-card p {{
+                color: #4a5568;
+                margin-bottom: 15px;
+                font-size: 14px;
+            }}
+            
+            .endpoint-url {{
+                background: #edf2f7;
+                padding: 12px;
+                border-radius: 8px;
+                font-family: monospace;
+                font-size: 14px;
+                margin-bottom: 15px;
+                word-break: break-all;
+            }}
+            
+            .btn {{
+                display: inline-block;
+                background: linear-gradient(135deg, #4299e1 0%, #3182ce 100%);
+                color: white;
+                padding: 12px 24px;
+                border-radius: 12px;
+                text-decoration: none;
+                font-weight: 600;
+                transition: all 0.3s ease;
+                border: none;
+                cursor: pointer;
+                font-size: 14px;
+            }}
+            
             .btn:hover {{
                 transform: translateY(-2px);
-                box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+                box-shadow: 0 8px 20px rgba(66, 153, 225, 0.3);
             }}
+            
+            .btn-success {{
+                background: linear-gradient(135deg, #48bb78 0%, #38a169 100%);
+            }}
+            
+            .btn-danger {{
+                background: linear-gradient(135deg, #f56565 0%, #e53e3e 100%);
+            }}
+            
             .instructions {{
-                background: #e9ecef;
+                background: #ebf8ff;
+                border-left: 4px solid #4299e1;
                 padding: 20px;
-                border-radius: 10px;
-                margin: 20px 0;
+                border-radius: 8px;
+                margin-bottom: 30px;
+            }}
+            
+            .instructions h3 {{
+                color: #2d3748;
+                margin-bottom: 15px;
+            }}
+            
+            .instructions ol {{
+                padding-left: 20px;
+            }}
+            
+            .instructions li {{
+                margin-bottom: 10px;
+                color: #4a5568;
+            }}
+            
+            .footer {{
+                text-align: center;
+                margin-top: 40px;
+                padding-top: 20px;
+                border-top: 2px solid #e2e8f0;
+                color: #718096;
+                font-size: 14px;
+            }}
+            
+            .telegram-link {{
+                display: inline-flex;
+                align-items: center;
+                gap: 8px;
+                background: #0088cc;
+                color: white;
+                padding: 12px 24px;
+                border-radius: 12px;
+                text-decoration: none;
+                font-weight: 600;
+                margin-top: 20px;
+            }}
+            
+            .telegram-link:hover {{
+                background: #0077b5;
+            }}
+            
+            @media (max-width: 768px) {{
+                .container {{
+                    padding: 20px;
+                }}
+                
+                .endpoints-grid {{
+                    grid-template-columns: 1fr;
+                }}
+                
+                h1 {{
+                    font-size: 28px;
+                }}
             }}
         </style>
     </head>
     <body>
         <div class="container">
-            <h1>🤖 Telegram Bot на Bot Host</h1>
-            <p><strong>Домен:</strong> {DOMAIN}</p>
+            <div class="header">
+                <div class="bot-avatar">🤖</div>
+                <h1>Telegram Bot @{bot_username}</h1>
+                <p class="subtitle">Работает на вебхуках • Домен: {DOMAIN}</p>
+            </div>
             
-            <div class="status success">
-                ✅ Бот активен и работает на вебхуках
+            <div class="status-card">
+                <div class="status-icon">✅</div>
+                <div class="status-content">
+                    <h3>Бот активен и работает</h3>
+                    <p>Статус вебхука: {webhook_status}</p>
+                </div>
             </div>
             
             <div class="instructions">
-                <h3>📋 Инструкция по настройке:</h3>
+                <h3>📋 Быстрая настройка:</h3>
                 <ol>
-                    <li>Установите токен бота в настройках Bot Host: <code>TELEGRAM_BOT_TOKEN</code></li>
-                    <li>Вебхук автоматически установится при запуске</li>
-                    <li>Для проверки перейдите в Telegram и напишите боту</li>
+                    <li>Нажмите "Установить вебхук" ниже</li>
+                    <li>Перейдите в Telegram и найдите @{bot_username}</li>
+                    <li>Отправьте команду /start для проверки</li>
+                    <li>Используйте /webhook для проверки статуса</li>
                 </ol>
             </div>
             
-            <div class="endpoints">
-                <h3>🔧 Доступные endpoints:</h3>
-                
-                <div class="endpoint">
-                    <span><strong>GET /</strong> - Эта страница</span>
-                    <a href="/" class="btn">Открыть</a>
+            <div class="endpoints-grid">
+                <div class="endpoint-card">
+                    <h3>🌐 Установить вебхук</h3>
+                    <p>Активирует получение сообщений от Telegram</p>
+                    <div class="endpoint-url">GET /set_webhook</div>
+                    <a href="/set_webhook" class="btn btn-success">Установить вебхук</a>
                 </div>
                 
-                <div class="endpoint">
-                    <span><strong>POST /webhook</strong> - Webhook Telegram</span>
-                    <code>используется ботом</code>
+                <div class="endpoint-card">
+                    <h3>📊 Информация о вебхуке</h3>
+                    <p>Показывает текущую конфигурацию вебхука</p>
+                    <div class="endpoint-url">GET /webhook_info</div>
+                    <a href="/webhook_info" class="btn">Проверить статус</a>
                 </div>
                 
-                <div class="endpoint">
-                    <span><strong>GET /set_webhook</strong> - Установить вебхук</span>
-                    <a href="/set_webhook" class="btn">Установить</a>
+                <div class="endpoint-card">
+                    <h3>❤️ Health Check</h3>
+                    <p>Проверка работоспособности бота</p>
+                    <div class="endpoint-url">GET /health</div>
+                    <a href="/health" class="btn">Проверить здоровье</a>
                 </div>
                 
-                <div class="endpoint">
-                    <span><strong>GET /webhook_info</strong> - Информация о вебхуке</span>
-                    <a href="/webhook_info" class="btn">Проверить</a>
+                <div class="endpoint-card">
+                    <h3>🤖 Информация о боте</h3>
+                    <p>Основная информация о Telegram боте</p>
+                    <div class="endpoint-url">GET /bot_info</div>
+                    <a href="/bot_info" class="btn">Информация о боте</a>
                 </div>
                 
-                <div class="endpoint">
-                    <span><strong>GET /health</strong> - Health check</span>
-                    <a href="/health" class="btn">Проверить</a>
+                <div class="endpoint-card">
+                    <h3>🗑️ Удалить вебхук</h3>
+                    <p>Отключает получение сообщений (только для отладки)</p>
+                    <div class="endpoint-url">GET /remove_webhook</div>
+                    <a href="/remove_webhook" class="btn btn-danger">Удалить вебхук</a>
                 </div>
                 
-                <div class="endpoint">
-                    <span><strong>GET /remove_webhook</strong> - Удалить вебхук</span>
-                    <a href="/remove_webhook" class="btn">Удалить</a>
+                <div class="endpoint-card">
+                    <h3>🔧 Webhook Endpoint</h3>
+                    <p>Основной endpoint для Telegram API</p>
+                    <div class="endpoint-url">POST /webhook</div>
+                    <p><small>Используется Telegram для отправки сообщений</small></p>
                 </div>
             </div>
             
-            <h3>🚀 Быстрый старт:</h3>
-            <p>1. <a href="/set_webhook" class="btn">Активировать вебхук</a></p>
-            <p>2. <a href="https://t.me/{bot.get_me().username}" target="_blank" class="btn">Открыть бота в Telegram</a></p>
-            <p>3. Отправьте команду <code>/start</code></p>
+            <div style="text-align: center; margin-top: 30px;">
+                <a href="https://t.me/{bot_username}" target="_blank" class="telegram-link">
+                    <span>💬 Перейти к боту в Telegram</span>
+                </a>
+            </div>
+            
+            <div class="footer">
+                <p>Bot Host • {DOMAIN} • Версия 1.0.0</p>
+                <p>Все системы работают нормально ⚡</p>
+            </div>
         </div>
         
         <script>
-            // Автоматически устанавливаем вебхук при загрузке страницы
-            fetch('/set_webhook')
-                .then(response => response.json())
-                .then(data => {{
-                    if(data.status === 'success') {{
-                        console.log('✅ Вебхук установлен:', data.webhook_url);
+            // Автоматическая проверка статуса при загрузке
+            async function checkStatus() {{
+                try {{
+                    const response = await fetch('/health');
+                    const data = await response.json();
+                    console.log('✅ Статус бота:', data);
+                }} catch (error) {{
+                    console.log('❌ Ошибка проверки статуса:', error);
+                }}
+            }}
+            
+            // Автоматически устанавливаем вебхук, если он не настроен
+            async function autoSetupWebhook() {{
+                try {{
+                    const response = await fetch('/webhook_info');
+                    const data = await response.json();
+                    
+                    if (data.status === 'success' && !data.webhook_info.url) {{
+                        // Вебхук не установлен, устанавливаем автоматически
+                        const setupResponse = await fetch('/set_webhook');
+                        const setupData = await setupResponse.json();
+                        
+                        if (setupData.status === 'success') {{
+                            console.log('✅ Вебхук автоматически установлен:', setupData.webhook_url);
+                            alert('✅ Вебхук успешно установлен! Теперь бот готов к работе.');
+                        }}
                     }}
-                }});
+                }} catch (error) {{
+                    console.log('Автоматическая настройка не удалась:', error);
+                }}
+            }}
+            
+            // Запускаем проверки при загрузке страницы
+            document.addEventListener('DOMContentLoaded', function() {{
+                checkStatus();
+                autoSetupWebhook();
+            }});
         </script>
     </body>
     </html>
@@ -392,9 +663,9 @@ if __name__ == '__main__':
     logger.info("=" * 60)
     logger.info(f"🚀 ЗАПУСК БОТА НА ВЕБХУКАХ")
     logger.info(f"🌐 Домен: {DOMAIN}")
-    logger.info(f"🤖 Бот: @{bot.get_me().username}")
+    logger.info(f"🤖 Бот: @{bot_username}")
     logger.info(f"🔧 Порт: {PORT}")
     logger.info("=" * 60)
     
     # Запускаем Flask приложение
-    app.run(host='0.0.0.0', port=PORT, debug=False)
+    app.run(host='0.0.0.0', port=PORT, debug=False, threaded=True)
