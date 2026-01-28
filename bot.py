@@ -1,7 +1,8 @@
 import os
 import logging
-from aiohttp import web
+from contextlib import asynccontextmanager
 
+from fastapi import FastAPI, Request, Response
 from aiogram import Bot, Dispatcher, Router, F
 from aiogram.types import (
     Message, 
@@ -9,12 +10,12 @@ from aiogram.types import (
     ReplyKeyboardMarkup, 
     KeyboardButton,
     InlineKeyboardMarkup, 
-    InlineKeyboardButton
+    InlineKeyboardButton,
+    Update
 )
 from aiogram.enums import ParseMode
 from aiogram.filters import Command, CommandStart
 from aiogram.client.default import DefaultBotProperties
-from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -22,23 +23,20 @@ from aiogram.fsm.state import State, StatesGroup
 # ==================== КОНФИГУРАЦИЯ ====================
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8506600032:AAE4YTWOjHrGdvDCg1nGgffMfFqGy4ur37M")
-PORT = int(os.getenv("PORT", 8080))
-
-# Получаем хост и убираем лишние слеши
 WEBHOOK_HOST = os.getenv("WEBHOOK_HOST", "").rstrip("/")
-
-# Простой путь без токена (безопаснее)
 WEBHOOK_PATH = "/webhook"
 WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}" if WEBHOOK_HOST else None
 
 # Логирование
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+# ==================== БОТ И ДИСПЕТЧЕР ====================
+
+bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+dp = Dispatcher(storage=MemoryStorage())
 router = Router()
+dp.include_router(router)
 
 # ==================== КЛАВИАТУРЫ ====================
 
@@ -195,91 +193,50 @@ async def handle_doc(message: Message):
 async def echo(message: Message):
     await message.answer(f"Вы: <i>{message.text}</i>\n\n/help - помощь")
 
-# ==================== STARTUP / SHUTDOWN ====================
+# ==================== FASTAPI APP ====================
 
-async def on_startup(bot: Bot):
-    # Удаляем старый вебхук
-    await bot.delete_webhook(drop_pending_updates=True)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # STARTUP
+    logger.info(f"🔧 WEBHOOK_URL: {WEBHOOK_URL}")
     
     if WEBHOOK_URL:
-        # Устанавливаем новый
+        await bot.delete_webhook(drop_pending_updates=True)
         await bot.set_webhook(
             url=WEBHOOK_URL,
-            drop_pending_updates=True,
             allowed_updates=["message", "callback_query"]
         )
-        logger.info(f"✅ Webhook установлен: {WEBHOOK_URL}")
-        
-        # Проверяем статус
         info = await bot.get_webhook_info()
-        logger.info(f"📡 Webhook info: url={info.url}, pending={info.pending_update_count}")
+        logger.info(f"✅ Webhook установлен: {info.url}")
     else:
         logger.error("❌ WEBHOOK_HOST не задан!")
-
-async def on_shutdown(bot: Bot):
+    
+    yield
+    
+    # SHUTDOWN
     logger.info("🛑 Остановка бота...")
     await bot.delete_webhook()
+    await bot.session.close()
 
-# ==================== HEALTH CHECK ====================
+# Создаём FastAPI приложение
+app = FastAPI(lifespan=lifespan)
 
-async def health_check(request):
-    """Проверка здоровья для BotHost"""
-    return web.Response(text="OK", status=200)
+@app.get("/")
+async def root():
+    return {"status": "ok", "message": "Bot is running!"}
 
-async def index(request):
-    """Главная страница"""
-    return web.Response(
-        text="Bot is running! Webhook path: /webhook",
-        status=200
-    )
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
 
-# ==================== MAIN ====================
-
-def main():
-    # Проверка токена
-    if BOT_TOKEN == "YOUR_BOT_TOKEN_HERE" or not BOT_TOKEN:
-        logger.error("❌ BOT_TOKEN не установлен!")
-        return
-    
-    # Проверка хоста
-    if not WEBHOOK_HOST:
-        logger.error("❌ WEBHOOK_HOST не установлен!")
-        return
-    
-    # Логируем конфигурацию
-    logger.info(f"🔧 WEBHOOK_HOST: {WEBHOOK_HOST}")
-    logger.info(f"🔧 WEBHOOK_PATH: {WEBHOOK_PATH}")
-    logger.info(f"🔧 WEBHOOK_URL: {WEBHOOK_URL}")
-    logger.info(f"🔧 PORT: {PORT}")
-    
-    # Создаём бота
-    bot = Bot(
-        token=BOT_TOKEN,
-        default=DefaultBotProperties(parse_mode=ParseMode.HTML)
-    )
-    
-    # Диспетчер
-    dp = Dispatcher(storage=MemoryStorage())
-    dp.include_router(router)
-    dp.startup.register(on_startup)
-    dp.shutdown.register(on_shutdown)
-    
-    # Веб-приложение
-    app = web.Application()
-    
-    # Роуты для проверки
-    app.router.add_get("/", index)
-    app.router.add_get("/health", health_check)
-    
-    # Webhook handler - регистрируем на /webhook
-    webhook_handler = SimpleRequestHandler(dispatcher=dp, bot=bot)
-    webhook_handler.register(app, path=WEBHOOK_PATH)
-    
-    setup_application(app, dp, bot=bot)
-    
-    # Запуск
-    logger.info(f"🚀 Запуск сервера на 0.0.0.0:{PORT}")
-    web.run_app(app, host="0.0.0.0", port=PORT)
-
-if __name__ == "__main__":
-    main()
+@app.post(WEBHOOK_PATH)
+async def webhook(request: Request):
+    """Обработка вебхука от Telegram"""
+    try:
+        data = await request.json()
+        update = Update(**data)
+        await dp.feed_update(bot=bot, update=update)
+        return Response(status_code=200)
+    except Exception as e:
+        logger.error(f"Webhook error: {e}")
+        return Response(status_code=200)  # Всегда 200, чтобы Telegram не повторял
