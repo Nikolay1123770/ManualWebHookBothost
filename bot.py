@@ -1,6 +1,5 @@
 import os
 import logging
-import asyncio
 from aiohttp import web
 
 from aiogram import Bot, Dispatcher, Router, F
@@ -22,11 +21,15 @@ from aiogram.fsm.state import State, StatesGroup
 
 # ==================== КОНФИГУРАЦИЯ ====================
 
-BOT_TOKEN = os.getenv("BOT_TOKEN", "8506600032:AAEwpmsVsssiog3gZNkRqZB3uXMNUGBEO2E")
-WEBHOOK_HOST = os.getenv("WEBHOOK_HOST", "https://manualwebhookbothost.bothost.ru/webhook")  # https://your-bot.bothost.io
-WEBHOOK_PATH = f"/webhook/{BOT_TOKEN}"
-WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}" if WEBHOOK_HOST else None
+BOT_TOKEN = os.getenv("BOT_TOKEN", "8506600032:AAE4YTWOjHrGdvDCg1nGgffMfFqGy4ur37M")
 PORT = int(os.getenv("PORT", 8080))
+
+# Получаем хост и убираем лишние слеши
+WEBHOOK_HOST = os.getenv("WEBHOOK_HOST", "").rstrip("/")
+
+# Простой путь без токена (безопаснее)
+WEBHOOK_PATH = "/webhook"
+WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}" if WEBHOOK_HOST else None
 
 # Логирование
 logging.basicConfig(
@@ -35,24 +38,21 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Роутер
 router = Router()
 
 # ==================== КЛАВИАТУРЫ ====================
 
 def main_menu() -> ReplyKeyboardMarkup:
-    """Главное меню"""
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="📋 Меню"), KeyboardButton(text="ℹ️ Информация")],
             [KeyboardButton(text="⚙️ Настройки"), KeyboardButton(text="📞 Контакты")],
-            [KeyboardButton(text="📍 Отправить локацию", request_location=True)]
+            [KeyboardButton(text="📍 Локация", request_location=True)]
         ],
         resize_keyboard=True
     )
 
 def inline_menu() -> InlineKeyboardMarkup:
-    """Инлайн меню"""
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
@@ -62,26 +62,22 @@ def inline_menu() -> InlineKeyboardMarkup:
             [
                 InlineKeyboardButton(text="🔙 Назад", callback_data="back"),
                 InlineKeyboardButton(text="🏠 Домой", callback_data="home")
-            ],
-            [InlineKeyboardButton(text="🌐 Наш сайт", url="https://example.com")]
+            ]
         ]
     )
 
 def settings_menu() -> InlineKeyboardMarkup:
-    """Меню настроек"""
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="🔔 Уведомления", callback_data="settings_notifications")],
-            [InlineKeyboardButton(text="🌍 Язык", callback_data="settings_language")],
+            [InlineKeyboardButton(text="🔔 Уведомления", callback_data="settings_notif")],
+            [InlineKeyboardButton(text="🌍 Язык", callback_data="settings_lang")],
             [InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_main")]
         ]
     )
 
-# ==================== FSM СОСТОЯНИЯ ====================
+# ==================== FSM ====================
 
 class UserForm(StatesGroup):
-    waiting_for_name = State()
-    waiting_for_age = State()
     waiting_for_feedback = State()
 
 # ==================== КОМАНДЫ ====================
@@ -90,200 +86,172 @@ class UserForm(StatesGroup):
 async def cmd_start(message: Message):
     await message.answer(
         f"👋 Привет, <b>{message.from_user.first_name}</b>!\n\n"
-        f"Добро пожаловать в бота!\n"
-        f"Используй меню ниже для навигации.",
+        f"Добро пожаловать в бота!",
         reply_markup=main_menu()
     )
 
 @router.message(Command("help"))
 async def cmd_help(message: Message):
     await message.answer(
-        "📚 <b>Список команд:</b>\n\n"
-        "/start - Запустить бота\n"
-        "/help - Показать помощь\n"
-        "/menu - Открыть меню\n"
-        "/feedback - Оставить отзыв\n"
-        "/cancel - Отменить действие\n\n"
-        "💡 <i>Также используйте кнопки меню!</i>"
+        "📚 <b>Команды:</b>\n\n"
+        "/start - Запуск\n"
+        "/help - Помощь\n"
+        "/menu - Меню\n"
+        "/feedback - Отзыв\n"
+        "/cancel - Отмена"
     )
 
 @router.message(Command("menu"))
 async def cmd_menu(message: Message):
-    await message.answer(
-        "📋 <b>Главное меню</b>\n\nВыберите действие:",
-        reply_markup=inline_menu()
-    )
+    await message.answer("📋 <b>Меню:</b>", reply_markup=inline_menu())
 
 @router.message(Command("cancel"))
 async def cmd_cancel(message: Message, state: FSMContext):
-    current_state = await state.get_state()
-    if current_state is None:
-        await message.answer("❌ Нечего отменять.")
-        return
     await state.clear()
-    await message.answer("✅ Действие отменено.", reply_markup=main_menu())
-
-# ==================== FSM: FEEDBACK ====================
+    await message.answer("✅ Отменено.", reply_markup=main_menu())
 
 @router.message(Command("feedback"))
 async def cmd_feedback(message: Message, state: FSMContext):
     await state.set_state(UserForm.waiting_for_feedback)
-    await message.answer(
-        "📝 Напишите ваш отзыв:\n\n"
-        "<i>Для отмены: /cancel</i>"
-    )
+    await message.answer("📝 Напишите отзыв (/cancel для отмены):")
 
 @router.message(UserForm.waiting_for_feedback)
 async def process_feedback(message: Message, state: FSMContext):
-    user = message.from_user
-    logger.info(f"Feedback from {user.id} (@{user.username}): {message.text}")
+    logger.info(f"Feedback from {message.from_user.id}: {message.text}")
     await state.clear()
-    await message.answer(
-        "✅ Спасибо за отзыв!",
-        reply_markup=main_menu()
-    )
+    await message.answer("✅ Спасибо за отзыв!", reply_markup=main_menu())
 
-# ==================== КНОПКИ REPLY ====================
+# ==================== КНОПКИ ====================
 
 @router.message(F.text == "📋 Меню")
 async def btn_menu(message: Message):
-    await message.answer(
-        "📋 <b>Выберите раздел:</b>",
-        reply_markup=inline_menu()
-    )
+    await message.answer("📋 <b>Меню:</b>", reply_markup=inline_menu())
 
 @router.message(F.text == "ℹ️ Информация")
 async def btn_info(message: Message):
-    await message.answer(
-        "ℹ️ <b>О боте</b>\n\n"
-        "Версия: 1.0.0\n"
-        "Разработчик: @your_username\n\n"
-        "Бот на webhook для BotHost."
-    )
+    await message.answer("ℹ️ <b>О боте</b>\n\nВерсия: 1.0.0")
 
 @router.message(F.text == "⚙️ Настройки")
 async def btn_settings(message: Message):
-    await message.answer(
-        "⚙️ <b>Настройки</b>\n\nВыберите параметр:",
-        reply_markup=settings_menu()
-    )
+    await message.answer("⚙️ <b>Настройки:</b>", reply_markup=settings_menu())
 
 @router.message(F.text == "📞 Контакты")
 async def btn_contacts(message: Message):
-    await message.answer(
-        "📞 <b>Контакты</b>\n\n"
-        "📧 Email: example@mail.com\n"
-        "📱 Telegram: @your_support\n"
-        "🌐 Сайт: example.com"
-    )
+    await message.answer("📞 <b>Контакты</b>\n\n📧 test@mail.com")
 
 @router.message(F.location)
 async def handle_location(message: Message):
-    lat = message.location.latitude
-    lon = message.location.longitude
-    await message.answer(
-        f"📍 <b>Ваша локация:</b>\n\n"
-        f"Широта: {lat}\n"
-        f"Долгота: {lon}"
-    )
+    await message.answer(f"📍 Широта: {message.location.latitude}\nДолгота: {message.location.longitude}")
 
-# ==================== CALLBACK HANDLERS ====================
+# ==================== CALLBACKS ====================
 
 @router.callback_query(F.data == "confirm_yes")
-async def callback_yes(callback: CallbackQuery):
-    await callback.answer("✅ Вы выбрали Да!")
-    await callback.message.edit_text("✅ Действие подтверждено.")
+async def cb_yes(callback: CallbackQuery):
+    await callback.answer("✅")
+    await callback.message.edit_text("✅ Подтверждено!")
 
 @router.callback_query(F.data == "confirm_no")
-async def callback_no(callback: CallbackQuery):
-    await callback.answer("❌ Вы выбрали Нет!")
-    await callback.message.edit_text("❌ Действие отменено.")
+async def cb_no(callback: CallbackQuery):
+    await callback.answer("❌")
+    await callback.message.edit_text("❌ Отменено!")
 
 @router.callback_query(F.data == "back")
-async def callback_back(callback: CallbackQuery):
+async def cb_back(callback: CallbackQuery):
     await callback.answer()
-    await callback.message.edit_text(
-        "📋 <b>Главное меню</b>",
-        reply_markup=inline_menu()
-    )
+    await callback.message.edit_text("📋 <b>Меню:</b>", reply_markup=inline_menu())
 
 @router.callback_query(F.data == "home")
-async def callback_home(callback: CallbackQuery):
-    await callback.answer("🏠 Домой")
+async def cb_home(callback: CallbackQuery):
+    await callback.answer()
     await callback.message.delete()
     await callback.message.answer("🏠 Главная", reply_markup=main_menu())
 
-@router.callback_query(F.data == "settings_notifications")
-async def callback_notifications(callback: CallbackQuery):
-    await callback.answer("🔔")
-    await callback.message.edit_text(
-        "🔔 <b>Уведомления</b>\n\n<i>В разработке...</i>",
-        reply_markup=settings_menu()
-    )
+@router.callback_query(F.data == "settings_notif")
+async def cb_notif(callback: CallbackQuery):
+    await callback.answer()
+    await callback.message.edit_text("🔔 <b>Уведомления</b>\n\n<i>В разработке</i>", reply_markup=settings_menu())
 
-@router.callback_query(F.data == "settings_language")
-async def callback_language(callback: CallbackQuery):
-    await callback.answer("🌍")
-    await callback.message.edit_text(
-        "🌍 <b>Язык:</b> Русский 🇷🇺\n\n<i>В разработке...</i>",
-        reply_markup=settings_menu()
-    )
+@router.callback_query(F.data == "settings_lang")
+async def cb_lang(callback: CallbackQuery):
+    await callback.answer()
+    await callback.message.edit_text("🌍 Язык: Русский 🇷🇺", reply_markup=settings_menu())
 
 @router.callback_query(F.data == "back_to_main")
-async def callback_back_main(callback: CallbackQuery):
+async def cb_back_main(callback: CallbackQuery):
     await callback.answer()
-    await callback.message.edit_text(
-        "📋 <b>Главное меню</b>",
-        reply_markup=inline_menu()
-    )
+    await callback.message.edit_text("📋 <b>Меню:</b>", reply_markup=inline_menu())
 
 # ==================== МЕДИА ====================
 
 @router.message(F.photo)
 async def handle_photo(message: Message):
-    await message.answer("📸 Красивое фото!")
+    await message.answer("📸 Фото получено!")
 
 @router.message(F.document)
-async def handle_document(message: Message):
+async def handle_doc(message: Message):
     await message.answer(f"📄 Файл: {message.document.file_name}")
-
-@router.message(F.sticker)
-async def handle_sticker(message: Message):
-    await message.answer("👍 Классный стикер!")
-
-@router.message(F.voice)
-async def handle_voice(message: Message):
-    await message.answer("🎤 Голосовое получено!")
-
-# ==================== ЭХО ====================
 
 @router.message(F.text)
 async def echo(message: Message):
-    await message.answer(
-        f"🤖 Вы написали: <i>{message.text}</i>\n\n"
-        f"Используйте /help для помощи."
-    )
+    await message.answer(f"Вы: <i>{message.text}</i>\n\n/help - помощь")
 
-# ==================== WEBHOOK ====================
+# ==================== STARTUP / SHUTDOWN ====================
 
 async def on_startup(bot: Bot):
+    # Удаляем старый вебхук
     await bot.delete_webhook(drop_pending_updates=True)
+    
     if WEBHOOK_URL:
-        await bot.set_webhook(url=WEBHOOK_URL, drop_pending_updates=True)
-        logger.info(f"✅ Webhook: {WEBHOOK_URL}")
+        # Устанавливаем новый
+        await bot.set_webhook(
+            url=WEBHOOK_URL,
+            drop_pending_updates=True,
+            allowed_updates=["message", "callback_query"]
+        )
+        logger.info(f"✅ Webhook установлен: {WEBHOOK_URL}")
+        
+        # Проверяем статус
+        info = await bot.get_webhook_info()
+        logger.info(f"📡 Webhook info: url={info.url}, pending={info.pending_update_count}")
     else:
-        logger.warning("⚠️ WEBHOOK_HOST не установлен!")
+        logger.error("❌ WEBHOOK_HOST не задан!")
 
 async def on_shutdown(bot: Bot):
-    logger.info("🛑 Бот остановлен")
+    logger.info("🛑 Остановка бота...")
     await bot.delete_webhook()
 
+# ==================== HEALTH CHECK ====================
+
 async def health_check(request):
+    """Проверка здоровья для BotHost"""
     return web.Response(text="OK", status=200)
+
+async def index(request):
+    """Главная страница"""
+    return web.Response(
+        text="Bot is running! Webhook path: /webhook",
+        status=200
+    )
 
 # ==================== MAIN ====================
 
 def main():
+    # Проверка токена
+    if BOT_TOKEN == "YOUR_BOT_TOKEN_HERE" or not BOT_TOKEN:
+        logger.error("❌ BOT_TOKEN не установлен!")
+        return
+    
+    # Проверка хоста
+    if not WEBHOOK_HOST:
+        logger.error("❌ WEBHOOK_HOST не установлен!")
+        return
+    
+    # Логируем конфигурацию
+    logger.info(f"🔧 WEBHOOK_HOST: {WEBHOOK_HOST}")
+    logger.info(f"🔧 WEBHOOK_PATH: {WEBHOOK_PATH}")
+    logger.info(f"🔧 WEBHOOK_URL: {WEBHOOK_URL}")
+    logger.info(f"🔧 PORT: {PORT}")
+    
     # Создаём бота
     bot = Bot(
         token=BOT_TOKEN,
@@ -298,16 +266,19 @@ def main():
     
     # Веб-приложение
     app = web.Application()
-    app.router.add_get("/", health_check)
+    
+    # Роуты для проверки
+    app.router.add_get("/", index)
     app.router.add_get("/health", health_check)
     
-    # Webhook handler
+    # Webhook handler - регистрируем на /webhook
     webhook_handler = SimpleRequestHandler(dispatcher=dp, bot=bot)
     webhook_handler.register(app, path=WEBHOOK_PATH)
+    
     setup_application(app, dp, bot=bot)
     
     # Запуск
-    logger.info(f"🚀 Запуск на порту {PORT}")
+    logger.info(f"🚀 Запуск сервера на 0.0.0.0:{PORT}")
     web.run_app(app, host="0.0.0.0", port=PORT)
 
 if __name__ == "__main__":
