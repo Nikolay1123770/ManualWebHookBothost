@@ -22,8 +22,8 @@ from aiogram.fsm.state import State, StatesGroup
 
 # ==================== КОНФИГУРАЦИЯ ====================
 
-BOT_TOKEN = os.getenv("BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
-WEBHOOK_HOST = os.getenv("WEBHOOK_HOST", "")  # https://your-bot.bothost.io
+BOT_TOKEN = os.getenv("BOT_TOKEN", "8506600032:AAEwpmsVsssiog3gZNkRqZB3uXMNUGBEO2E")
+WEBHOOK_HOST = os.getenv("WEBHOOK_HOST", "https://manualwebhookbothost.bothost.ru")  # https://your-bot.bothost.io
 WEBHOOK_PATH = f"/webhook/{BOT_TOKEN}"
 WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}" if WEBHOOK_HOST else None
 PORT = int(os.getenv("PORT", 8080))
