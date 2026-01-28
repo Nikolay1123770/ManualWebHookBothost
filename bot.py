@@ -13,338 +13,388 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Получение переменных окружения (Bot Host автоматически устанавливает их)
+# Конфигурация для вебхука
 TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
-WEBHOOK_URL = os.getenv('WEBHOOK_URL')  # Bot Host предоставляет URL вебхука
-PORT = int(os.getenv('PORT', 8080))  # Bot Host использует порт 8080
+DOMAIN = os.getenv('BOTHOST_DOMAIN', 'manualwebhookbothost.bothost.ru')
+PORT = int(os.getenv('PORT', 8080))
 
-# Проверка наличия обязательных переменных
+# Проверка токена
 if not TOKEN:
-    logger.error("Токен бота не найден! Установите переменную TELEGRAM_BOT_TOKEN")
-    raise ValueError("Токен бота не найден!")
+    logger.error("❌ ТОКЕН НЕ НАЙДЕН! Установите TELEGRAM_BOT_TOKEN в настройках Bot Host")
+    raise ValueError("Токен бота не найден")
 
-# Инициализация бота и Flask приложения
+# Инициализация
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
-# Глобальные переменные для хранения данных
-# В реальном проекте используйте базу данных
-user_sessions = {}
+# Глобальная переменная для отслеживания состояния вебхука
+webhook_configured = False
 
-# Клавиатуры
-def get_main_keyboard():
-    """Основная клавиатура"""
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
-    btn1 = types.KeyboardButton('📋 Информация')
-    btn2 = types.KeyboardButton('⚙️ Настройки')
-    btn3 = types.KeyboardButton('🆘 Помощь')
-    btn4 = types.KeyboardButton('📊 Статистика')
-    markup.add(btn1, btn2, btn3, btn4)
-    return markup
-
-def get_inline_keyboard():
-    """Inline клавиатура"""
-    markup = types.InlineKeyboardMarkup(row_width=2)
-    btn1 = types.InlineKeyboardButton('Сайт', url='https://example.com')
-    btn2 = types.InlineKeyboardButton('Документация', url='https://docs.example.com')
-    btn3 = types.InlineKeyboardButton('Обновить', callback_data='refresh')
-    btn4 = types.InlineKeyboardButton('Настройки', callback_data='settings')
-    markup.add(btn1, btn2, btn3, btn4)
-    return markup
-
-# Обработчики команд
-@bot.message_handler(commands=['start'])
-def send_welcome(message):
-    """Обработка команды /start"""
-    user_id = message.from_user.id
-    user_name = message.from_user.first_name
+def configure_webhook(force=False):
+    """Настройка вебхука - ВЫЗЫВАЕТСЯ АВТОМАТИЧЕСКИ ПРИ ЗАПУСКЕ"""
+    global webhook_configured
     
-    # Инициализация сессии пользователя
-    user_sessions[user_id] = {
-        'last_active': datetime.now().isoformat(),
-        'command_count': 0
-    }
+    if webhook_configured and not force:
+        logger.info("Вебхук уже настроен")
+        return True
+    
+    try:
+        # Формируем URL вебхука
+        webhook_url = f"https://{DOMAIN}/webhook"
+        
+        # Удаляем старый вебхук
+        bot.remove_webhook()
+        
+        # Устанавливаем новый вебхук
+        success = bot.set_webhook(
+            url=webhook_url,
+            max_connections=50,
+            timeout=60
+        )
+        
+        if success:
+            webhook_configured = True
+            logger.info(f"✅ ВЕБХУК УСПЕШНО УСТАНОВЛЕН!")
+            logger.info(f"🌐 URL: {webhook_url}")
+            
+            # Получаем информацию о вебхуке
+            webhook_info = bot.get_webhook_info()
+            logger.info(f"📊 Информация о вебхуке: {webhook_info.to_dict()}")
+            
+            return True
+        else:
+            logger.error("❌ Не удалось установить вебхук")
+            return False
+            
+    except Exception as e:
+        logger.error(f"❌ Ошибка настройки вебхука: {e}")
+        return False
+
+# Конфигурируем вебхук ПРИ ЗАПУСКЕ приложения
+configure_webhook()
+
+# ============ ОБРАБОТЧИКИ КОМАНД ============
+
+@bot.message_handler(commands=['start'])
+def start_handler(message):
+    """Обработка команды /start"""
+    user = message.from_user
     
     welcome_text = f"""
-    👋 Привет, {user_name}!
+    🎉 <b>ПРИВЕТ, {user.first_name}!</b>
 
-    Я телеграм бот, развернутый на Bot Host.
+    ✅ <b>Бот работает на вебхуках!</b>
+    🌐 <b>Домен:</b> {DOMAIN}
+    🆔 <b>Ваш ID:</b> <code>{user.id}</code>
+    🤖 <b>Бот:</b> @{bot.get_me().username}
 
-    Доступные команды:
-    /start - Начать работу
-    /help - Получить помощь
-    /info - Информация о боте
-    /stats - Статистика использования
-    /menu - Показать меню
+    <b>Команды:</b>
+    /start - Начало работы
+    /webhook - Проверить вебхук
+    /status - Статус бота
+    /echo [текст] - Эхо
 
-    Выберите действие ниже или используйте команды.
+    <b>Тестируйте команды!</b>
     """
     
     bot.send_message(
         message.chat.id,
         welcome_text,
-        reply_markup=get_main_keyboard(),
         parse_mode='HTML'
     )
     
-    logger.info(f"Новый пользователь: {user_name} (ID: {user_id})")
+    logger.info(f"Новый пользователь: {user.first_name} (ID: {user.id})")
 
-@bot.message_handler(commands=['help'])
-def send_help(message):
-    """Обработка команды /help"""
-    help_text = """
-    🆘 <b>Помощь по боту</b>
-
-    <b>Основные команды:</b>
-    /start - Начало работы
-    /help - Эта справка
-    /info - Информация о боте
-    /menu - Главное меню
-    /stats - Статистика использования
-
-    <b>Особенности:</b>
-    • Бот работает 24/7 на Bot Host
-    • Использует вебхуки для получения сообщений
-    • Оптимизирован для облачного развертывания
-
-    <b>Техническая поддержка:</b>
-    По вопросам работы бота обращайтесь к администратору.
-    """
-    
-    bot.send_message(message.chat.id, help_text, parse_mode='HTML')
-    logger.info(f"Пользователь {message.from_user.id} запросил помощь")
-
-@bot.message_handler(commands=['info'])
-def send_info(message):
-    """Обработка команды /info"""
-    info_text = f"""
-    📊 <b>Информация о боте</b>
-
-    <b>Текущий статус:</b> ✅ Активен
-    <b>Платформа:</b> Bot Host
-    <b>Режим:</b> Вебхук
-    <b>Пользователей в сессии:</b> {len(user_sessions)}
-    <b>ID вашего чата:</b> <code>{message.chat.id}</code>
-    <b>Версия:</b> 1.0.0
-
-    <b>Технологии:</b>
-    • Python 3.9+
-    • pyTelegramBotAPI
-    • Flask
-    • Bot Host инфраструктура
-    """
-    
-    bot.send_message(message.chat.id, info_text, parse_mode='HTML')
-
-@bot.message_handler(commands=['stats'])
-def send_stats(message):
-    """Обработка команды /stats"""
-    user_id = message.from_user.id
-    
-    if user_id in user_sessions:
-        user_stats = user_sessions[user_id]
-        stats_text = f"""
-        📈 <b>Ваша статистика</b>
+@bot.message_handler(commands=['webhook'])
+def webhook_info(message):
+    """Информация о вебхуке"""
+    try:
+        info = bot.get_webhook_info().to_dict()
         
-        <b>Последняя активность:</b> {user_stats['last_active']}
-        <b>Количество команд:</b> {user_stats['command_count']}
-        <b>Общие сессии:</b> {len(user_sessions)}
+        status = "✅ АКТИВЕН" if info.get('url') else "❌ НЕ АКТИВЕН"
+        
+        response = f"""
+        🌐 <b>ИНФОРМАЦИЯ О ВЕБХУКЕ</b>
+
+        <b>Статус:</b> {status}
+        <b>URL:</b> <code>{info.get('url', 'Не установлен')}</code>
+        <b>Домен:</b> {DOMAIN}
+        <b>Ожидающих сообщений:</b> {info.get('pending_update_count', 0)}
+        <b>Макс. соединений:</b> {info.get('max_connections', 40)}
+        
+        <b>Для переустановки:</b>
+        https://{DOMAIN}/set_webhook
         """
-    else:
-        stats_text = "Статистика не найдена. Используйте /start для начала работы."
-    
-    bot.send_message(message.chat.id, stats_text, parse_mode='HTML')
-    user_sessions[user_id]['command_count'] += 1
+        
+        bot.send_message(message.chat.id, response, parse_mode='HTML')
+        
+    except Exception as e:
+        bot.send_message(message.chat.id, f"❌ Ошибка: {str(e)}")
 
-@bot.message_handler(commands=['menu'])
-def show_menu(message):
-    """Показать меню"""
-    bot.send_message(
-        message.chat.id,
-        "📱 <b>Главное меню</b>\n\nВыберите действие на клавиатуре:",
-        reply_markup=get_main_keyboard(),
-        parse_mode='HTML'
-    )
+@bot.message_handler(commands=['status'])
+def status_command(message):
+    """Статус бота"""
+    status_text = f"""
+    📊 <b>СТАТУС БОТА</b>
 
-# Обработка текстовых сообщений
-@bot.message_handler(func=lambda message: True)
-def handle_text(message):
-    """Обработка всех текстовых сообщений"""
-    user_id = message.from_user.id
-    text = message.text.lower()
+    ✅ <b>Работает на вебхуках</b>
+    🌐 <b>Домен:</b> {DOMAIN}
+    🤖 <b>Username:</b> @{bot.get_me().username}
+    ⚡ <b>Режим:</b> Вебхук (Webhook)
+    🔧 <b>Вебхук настроен:</b> {'Да' if webhook_configured else 'Нет'}
     
-    # Обновление сессии пользователя
-    if user_id not in user_sessions:
-        user_sessions[user_id] = {'last_active': datetime.now().isoformat(), 'command_count': 0}
-    else:
-        user_sessions[user_id]['last_active'] = datetime.now().isoformat()
+    <b>Health check:</b> https://{DOMAIN}/health
+    <b>Инфо о вебхуке:</b> https://{DOMAIN}/webhook_info
+    """
     
-    # Обработка текстовых команд с клавиатуры
-    if text == '📋 информация':
-        bot.send_message(
-            message.chat.id,
-            "📋 <b>Информация</b>\n\nЭтот бот демонстрирует возможности развертывания на Bot Host.",
-            parse_mode='HTML',
-            reply_markup=get_inline_keyboard()
-        )
-    elif text == '⚙️ настройки':
-        bot.send_message(
-            message.chat.id,
-            "⚙️ <b>Настройки</b>\n\nЗдесь будут доступны настройки бота.",
-            parse_mode='HTML'
-        )
-    elif text == '🆘 помощь':
-        send_help(message)
-    elif text == '📊 статистика':
-        send_stats(message)
-    else:
-        # Ответ на произвольное сообщение
-        bot.send_message(
-            message.chat.id,
-            f"Вы сказали: {message.text}\n\nИспользуйте команды или меню для навигации.",
-            reply_markup=get_main_keyboard()
-        )
-    
-    logger.info(f"Получено сообщение от {user_id}: {message.text}")
+    bot.send_message(message.chat.id, status_text, parse_mode='HTML')
 
-# Обработка callback запросов от inline кнопок
-@bot.callback_query_handler(func=lambda call: True)
-def handle_callback(call):
-    """Обработка нажатий на inline кнопки"""
-    if call.data == 'refresh':
-        bot.answer_callback_query(call.id, "Обновление...")
-        bot.edit_message_text(
-            "✅ Данные обновлены!",
-            call.message.chat.id,
-            call.message.message_id
-        )
-    elif call.data == 'settings':
-        bot.answer_callback_query(call.id, "Открываем настройки...")
-        bot.send_message(call.message.chat.id, "Настройки открыты!")
-    
-    logger.info(f"Callback от {call.from_user.id}: {call.data}")
+@bot.message_handler(commands=['echo'])
+def echo_command(message):
+    """Эхо команда"""
+    text = message.text[6:] if len(message.text) > 6 else "Вы ничего не написали"
+    bot.reply_to(message, f"🔊 Эхо: {text}")
 
-# Обработка ошибок
-@bot.message_handler(func=lambda message: True, content_types=['audio', 'video', 'document', 'photo'])
-def handle_media(message):
-    """Обработка медиафайлов"""
-    bot.send_message(
-        message.chat.id,
-        "📁 Я получил ваш файл! В текущей версии я фокусируюсь на текстовых командах.",
-        reply_markup=get_main_keyboard()
-    )
+@bot.message_handler(func=lambda m: True)
+def echo_all(message):
+    """Обработка всех сообщений"""
+    bot.reply_to(message, f"📝 Вы написали: {message.text}")
 
-# Маршруты для вебхука
+# ============ FLASK ENDPOINTS ============
+
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    """Основной endpoint для вебхука"""
+    """Основной endpoint для вебхука Telegram"""
     if request.headers.get('content-type') == 'application/json':
-        json_string = request.get_data().decode('utf-8')
-        update = telebot.types.Update.de_json(json_string)
-        bot.process_new_updates([update])
-        return '', 200
-    else:
-        return 'Bad Request', 400
+        try:
+            update = telebot.types.Update.de_json(request.get_json())
+            bot.process_new_updates([update])
+            logger.debug(f"Обработано обновление: {update.update_id}")
+            return jsonify({'status': 'ok'}), 200
+        except Exception as e:
+            logger.error(f"Ошибка обработки вебхука: {e}")
+            return jsonify({'error': str(e)}), 500
+    return jsonify({'error': 'Invalid content-type'}), 400
 
-@app.route('/set_webhook', methods=['GET'])
-def set_webhook():
-    """Установка вебхука (вызывается при деплое)"""
-    if not WEBHOOK_URL:
-        return jsonify({'error': 'WEBHOOK_URL не установлен'}), 500
-    
-    webhook_url = f"{WEBHOOK_URL}/webhook"
-    
+@app.route('/set_webhook', methods=['GET', 'POST'])
+def set_webhook_endpoint():
+    """Endpoint для установки вебхука (вручную)"""
     try:
-        bot.remove_webhook()
-        bot.set_webhook(url=webhook_url)
-        logger.info(f"Вебхук установлен: {webhook_url}")
-        return jsonify({
-            'status': 'success',
-            'message': f'Вебхук установлен на {webhook_url}',
-            'webhook_info': bot.get_webhook_info().to_dict()
-        }), 200
+        success = configure_webhook(force=True)
+        
+        if success:
+            info = bot.get_webhook_info().to_dict()
+            return jsonify({
+                'status': 'success',
+                'message': 'Вебхук успешно установлен',
+                'domain': DOMAIN,
+                'webhook_url': info.get('url'),
+                'webhook_info': info
+            }), 200
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': 'Не удалось установить вебхук'
+            }), 500
+            
     except Exception as e:
-        logger.error(f"Ошибка установки вебхука: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'status': 'error', 'message': str(e)}), 500
 
 @app.route('/remove_webhook', methods=['GET'])
 def remove_webhook():
     """Удаление вебхука"""
     try:
         bot.remove_webhook()
-        logger.info("Вебхук удален")
-        return jsonify({'status': 'success', 'message': 'Вебхук удален'}), 200
+        global webhook_configured
+        webhook_configured = False
+        
+        return jsonify({
+            'status': 'success',
+            'message': 'Вебхук удален'
+        }), 200
     except Exception as e:
-        logger.error(f"Ошибка удаления вебхука: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'status': 'error', 'message': str(e)}), 500
 
 @app.route('/health', methods=['GET'])
 def health_check():
-    """Health check endpoint для Bot Host"""
+    """Health check для Bot Host"""
     return jsonify({
         'status': 'healthy',
-        'bot_username': bot.get_me().username if TOKEN else 'not_configured',
-        'users_in_session': len(user_sessions),
+        'bot': bot.get_me().username if TOKEN else 'not_configured',
+        'webhook_configured': webhook_configured,
+        'domain': DOMAIN,
         'timestamp': datetime.now().isoformat()
     }), 200
+
+@app.route('/webhook_info', methods=['GET'])
+def get_webhook_info():
+    """Получить информацию о вебхуке"""
+    try:
+        info = bot.get_webhook_info().to_dict()
+        return jsonify({
+            'status': 'success',
+            'webhook_info': info,
+            'domain': DOMAIN,
+            'configured': webhook_configured
+        }), 200
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
 
 @app.route('/')
 def index():
     """Главная страница"""
-    return '''
+    return f'''
     <!DOCTYPE html>
     <html>
     <head>
-        <title>Telegram Bot on Bot Host</title>
+        <title>🤖 Telegram Bot на Webhook</title>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
         <style>
-            body { font-family: Arial, sans-serif; margin: 40px; }
-            .container { max-width: 800px; margin: 0 auto; }
-            .status { padding: 10px; border-radius: 5px; margin: 10px 0; }
-            .healthy { background-color: #d4edda; color: #155724; }
-            .endpoints { margin-top: 20px; }
-            .endpoint { background: #f8f9fa; padding: 10px; margin: 5px 0; border-left: 4px solid #007bff; }
+            body {{
+                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                max-width: 800px;
+                margin: 0 auto;
+                padding: 20px;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: white;
+                min-height: 100vh;
+            }}
+            .container {{
+                background: rgba(255, 255, 255, 0.95);
+                color: #333;
+                border-radius: 20px;
+                padding: 40px;
+                box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            }}
+            h1 {{ color: #667eea; margin-top: 0; }}
+            .status {{
+                padding: 15px;
+                border-radius: 10px;
+                margin: 20px 0;
+                font-weight: bold;
+            }}
+            .success {{ background: #d4edda; color: #155724; }}
+            .endpoints {{
+                background: #f8f9fa;
+                padding: 20px;
+                border-radius: 10px;
+                margin: 20px 0;
+            }}
+            .endpoint {{
+                background: white;
+                padding: 15px;
+                margin: 10px 0;
+                border-left: 5px solid #667eea;
+                border-radius: 5px;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+            }}
+            .btn {{
+                background: #667eea;
+                color: white;
+                padding: 10px 20px;
+                border: none;
+                border-radius: 5px;
+                text-decoration: none;
+                display: inline-block;
+                margin: 5px;
+                transition: transform 0.2s;
+            }}
+            .btn:hover {{
+                transform: translateY(-2px);
+                box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+            }}
+            .instructions {{
+                background: #e9ecef;
+                padding: 20px;
+                border-radius: 10px;
+                margin: 20px 0;
+            }}
         </style>
     </head>
     <body>
         <div class="container">
             <h1>🤖 Telegram Bot на Bot Host</h1>
-            <p>Этот бот работает на вебхуках и оптимизирован для развертывания на Bot Host.</p>
+            <p><strong>Домен:</strong> {DOMAIN}</p>
             
-            <div class="status healthy">
-                ✅ Бот активен и готов к работе
+            <div class="status success">
+                ✅ Бот активен и работает на вебхуках
+            </div>
+            
+            <div class="instructions">
+                <h3>📋 Инструкция по настройке:</h3>
+                <ol>
+                    <li>Установите токен бота в настройках Bot Host: <code>TELEGRAM_BOT_TOKEN</code></li>
+                    <li>Вебхук автоматически установится при запуске</li>
+                    <li>Для проверки перейдите в Telegram и напишите боту</li>
+                </ol>
             </div>
             
             <div class="endpoints">
-                <h3>Доступные endpoints:</h3>
-                <div class="endpoint"><strong>GET /</strong> - Эта страница</div>
-                <div class="endpoint"><strong>POST /webhook</strong> - Webhook для Telegram</div>
-                <div class="endpoint"><strong>GET /set_webhook</strong> - Установить вебхук</div>
-                <div class="endpoint"><strong>GET /remove_webhook</strong> - Удалить вебхук</div>
-                <div class="endpoint"><strong>GET /health</strong> - Health check</div>
+                <h3>🔧 Доступные endpoints:</h3>
+                
+                <div class="endpoint">
+                    <span><strong>GET /</strong> - Эта страница</span>
+                    <a href="/" class="btn">Открыть</a>
+                </div>
+                
+                <div class="endpoint">
+                    <span><strong>POST /webhook</strong> - Webhook Telegram</span>
+                    <code>используется ботом</code>
+                </div>
+                
+                <div class="endpoint">
+                    <span><strong>GET /set_webhook</strong> - Установить вебхук</span>
+                    <a href="/set_webhook" class="btn">Установить</a>
+                </div>
+                
+                <div class="endpoint">
+                    <span><strong>GET /webhook_info</strong> - Информация о вебхуке</span>
+                    <a href="/webhook_info" class="btn">Проверить</a>
+                </div>
+                
+                <div class="endpoint">
+                    <span><strong>GET /health</strong> - Health check</span>
+                    <a href="/health" class="btn">Проверить</a>
+                </div>
+                
+                <div class="endpoint">
+                    <span><strong>GET /remove_webhook</strong> - Удалить вебхук</span>
+                    <a href="/remove_webhook" class="btn">Удалить</a>
+                </div>
             </div>
             
-            <div style="margin-top: 30px;">
-                <h3>Инструкция по деплою:</h3>
-                <ol>
-                    <li>Замените TELEGRAM_BOT_TOKEN на свой токен в Bot Host</li>
-                    <li>Bot Host автоматически установит WEBHOOK_URL</li>
-                    <li>После деплоя перейдите на /set_webhook для активации</li>
-                    <li>Проверьте статус на /health</li>
-                </ol>
-            </div>
+            <h3>🚀 Быстрый старт:</h3>
+            <p>1. <a href="/set_webhook" class="btn">Активировать вебхук</a></p>
+            <p>2. <a href="https://t.me/{bot.get_me().username}" target="_blank" class="btn">Открыть бота в Telegram</a></p>
+            <p>3. Отправьте команду <code>/start</code></p>
         </div>
+        
+        <script>
+            // Автоматически устанавливаем вебхук при загрузке страницы
+            fetch('/set_webhook')
+                .then(response => response.json())
+                .then(data => {{
+                    if(data.status === 'success') {{
+                        console.log('✅ Вебхук установлен:', data.webhook_url);
+                    }}
+                }});
+        </script>
     </body>
     </html>
     '''
 
-# Точка входа для локального тестирования
+# ============ ЗАПУСК ПРИЛОЖЕНИЯ ============
+
 if __name__ == '__main__':
-    # В локальном режиме используем polling
-    if os.environ.get('BOT_HOST_DEPLOY') is None:
-        logger.info("Локальный режим: запуск polling...")
-        bot.remove_webhook()
-        bot.polling(none_stop=True)
-    else:
-        # В режиме Bot Host запускаем Flask приложение
-        logger.info(f"Запуск на Bot Host на порту {PORT}")
-        app.run(host='0.0.0.0', port=PORT, debug=False)
+    logger.info("=" * 60)
+    logger.info(f"🚀 ЗАПУСК БОТА НА ВЕБХУКАХ")
+    logger.info(f"🌐 Домен: {DOMAIN}")
+    logger.info(f"🤖 Бот: @{bot.get_me().username}")
+    logger.info(f"🔧 Порт: {PORT}")
+    logger.info("=" * 60)
+    
+    # Запускаем Flask приложение
+    app.run(host='0.0.0.0', port=PORT, debug=False)
